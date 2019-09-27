@@ -1,0 +1,135 @@
+---
+title: "Econ Final Paper"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(readr)
+library(readxl)
+library(stringr)
+library(ggplot2)
+```
+
+```{r}
+gini_index <- read.csv("gini_index.CSV")
+gini_index <- gini_index %>% select(1, 5:62)
+country_indicator <- read.csv("Country_Indicator.csv")
+country_indicator <- country_indicator %>% select(2:3, 5)
+colnames(country_indicator)[3] = "Country.Name"
+country_indicator <- country_indicator %>% mutate(Country.Name = as.character(Country.Name))
+
+gini_combined_wide <- inner_join(gini_index, country_indicator, by = "Country.Name")
+
+no_x <- str_replace_all(colnames(gini_index)[2:59],"[^[:digit:]]","")
+
+rename_by_pos = function(df, index, new_name){ 
+    colnames(df)[index] = new_name 
+    df 
+}
+
+gini_combined_wide <- gini_combined_wide %>% rename_by_pos(2:59, no_x)
+
+gini_combined_wide[, c(2:59)] <- sapply(gini_combined_wide[, c(2:59)], as.numeric)
+gini_combined_narrow <- gather(data = gini_combined_wide, key = Year, value = GINI, 2:59)
+```
+
+```{r}
+trade_per_gdp <- read.csv("trade_per_gdp.CSV")
+
+trade_per_gdp <- trade_per_gdp %>% select(1, 5:62)
+
+trade_combined_wide <- inner_join(trade_per_gdp, country_indicator, by = "Country.Name")
+
+trade_combined_wide <- trade_combined_wide %>% rename_by_pos(2:59, no_x)
+
+trade_combined_wide[, c(2:59)] <- sapply(trade_combined_wide[, c(2:59)], as.numeric)
+trade_combined_narrow <- gather(data = trade_combined_wide, key = Year, value = percentage, 2:59)
+```
+
+```{r}
+school <- read_excel("secondary_school.xls")
+school <- school %>% select(1, 5:62)
+school_combined_wide <- inner_join(school, country_indicator, by = "Country.Name")
+school_combined_wide <- school_combined_wide %>% rename_by_pos(2:59, no_x)
+school_combined_wide[, c(2:59)] <- sapply(school_combined_wide[, c(2:59)], as.numeric)
+school_combined_narrow <- gather(data = school_combined_wide, key = Year, value = school, 2:59)
+```
+
+```{r}
+as.numeric.factor <- function(x) {as.numeric(levels(x))[x]}
+
+world_governance <- read.csv("World_Governance_Indicator.csv")
+
+no_x2 <- str_replace_all(colnames(world_governance)[3:20],"[^[:digit:]]","")
+
+world_combined_wide <- inner_join(world_governance, country_indicator, by = "Country.Name")
+world_combined_wide <- world_combined_wide %>% rename_by_pos(3:20, no_x2)
+world_combined_wide[, c(3:20)] <- sapply(world_combined_wide[, c(3:20)], as.numeric.factor)
+
+governance_effectiveness <- world_combined_wide %>% filter(Series.Name == "Government Effectiveness: Estimate")
+governance_effectiveness_narrow <- gather(data = governance_effectiveness, key = Year, value = government, 3:20) %>% select(-Series.Name)
+
+voice <- world_combined_wide %>% filter(Series.Name == "Voice and Accountability: Estimate")
+voice_narrow <- gather(data = voice, key = Year, value = voice, 3:20) %>% select(-Series.Name)
+```
+
+```{r}
+cpia_2017 <- read_excel("CPI2017_FullDataSet.xlsx")
+cpia_2017 <- cpia_2017 %>% select(1,4)
+colnames(cpia_2017)[1] = "Country.Name"
+colnames(cpia_2017)[2] = "2017"
+cpia_2017 <- cpia_2017[-(1:2),]
+
+cpia_2016 <- read_excel("CPI2016_FullDataSetWithRegionalTables.xlsx")
+cpia_2016 <- cpia_2016 %>% select(1:2)
+colnames(cpia_2016)[1] = "Country.Name"
+colnames(cpia_2016)[2] = "2016"
+
+cpia_2016_17 <- full_join(cpia_2016,cpia_2017, by = "Country.Name")
+cpia_2016_17 <- cpia_2016_17[-(181:182),]
+
+cpia_index <- read_excel("CPI1998-2015.xlsx")
+cpia_index <- full_join(cpia_index, cpia_2016_17, by = "Country.Name")
+
+variables <- c("1998","1999","2000","2001","2002","2003","2004","2005","2006","2007","2008","2009","2010","2011","2012","2013","2014","2015","2016","2017")
+
+cpia_index[variables] <- sapply(cpia_index[variables],as.numeric)
+
+variables_2 <- c("1998","1999","2000","2001","2002","2003","2004","2005","2006","2007","2008","2009","2010","2011")
+
+cpia_index <- cpia_index %>% mutate_at(.vars = vars(variables_2), funs(.*10))
+
+cpia_index_narrow <- gather(data = cpia_index, key = Year, value = CPI, 2:21)
+```
+
+```{r}
+final_data <- inner_join(gini_combined_narrow, trade_combined_narrow)
+final_data <- inner_join(final_data, school_combined_narrow)
+final_data <- inner_join(final_data, governance_effectiveness_narrow)
+final_data <- inner_join(final_data, voice_narrow)
+final_data <- inner_join(final_data, cpia_index_narrow)
+final_data <- final_data %>% na.omit
+final_data <- final_data %>% mutate(Income = ifelse(IncomeGroup %in% c("Upper middle income","Lower middle income"), "Middle Income", ifelse(IncomeGroup == "High income","High Income", "Low Income")))
+middle <- final_data %>% filter(Income == "Middle Income")
+```
+
+```{r}
+plot(~GINI + log(percentage) + log(CPI) + government + voice + school, data = middle)
+```
+
+```{r}
+ggplot(data = middle, aes(x = log(percentage), y = GINI)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+```{r}
+general.lm <- lm(GINI ~ log(percentage) + log(CPI) + school + government + voice, data = middle)
+summary(general.lm)
+```
